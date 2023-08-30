@@ -1,0 +1,166 @@
+- name: "Monitoring and Auditing"
+  hosts: localhost
+  tasks:
+    - name: "Install AuditD"
+      apt:
+        name: auditd
+        state: present
+      become: yes
+      become_method: sudo
+    - name: "Install software-properties-common"
+      apt:
+        name: software-properties-common
+        state: present
+      become: yes
+      become_method: sudo
+    - name: "Add bashtop PPA repository"
+      apt_repository:
+        repo: "ppa:bashtop-monitor/bashtop"
+      become: yes
+      become_method: sudo
+    - name: "Update apt cache"
+      apt:
+        update_cache: yes
+      become: yes
+      become_method: sudo
+    - name: "Install bashtop"
+      apt:
+        name: bashtop
+        state: present
+      become: yes
+      become_method: sudo
+    - name: "Clone fzf repository"
+      git:
+        repo: "https://github.com/junegunn/fzf.git"
+        dest: "~/.fzf"
+        depth: 1
+    - name: "Execute fzf installation script"
+      command: bash -c "~/.fzf/install --all && sudo cp ~/.fzf/bin/fzf /usr/bin/fzf && source ~/.bashrc"
+      args:
+        chdir: "{{ ansible_user_dir }}"
+    - name: "Download file auditd.yml from github"
+      shell: wget https://raw.githubusercontent.com/Neo23x0/auditd/master/audit.rules
+    - name: "Configure AuditD rules"
+      copy:
+        src: "audit.rules"
+        dest: "/etc/audit/rules.d/audit.rules"
+        owner: root
+        group: root
+        mode: 0640
+      become: yes
+      become_method: sudo
+    - name: "Create _laurel user"
+      user:
+        name: _laurel
+        state: present
+        shell: /bin/false
+        create_home: no
+        home: /var/log/laurel
+      become: yes
+      become_method: sudo
+    - name: "Create /var/log/laurel directory"
+      file:
+        path: /var/log/laurel
+        state: directory
+        owner: _laurel
+        group: _laurel
+        mode: 0750
+      become: yes
+      become_method: sudo
+    - name: "Create directory /etc/laurel"
+      file:
+        path: /etc/laurel
+        state: directory
+        owner: root
+        group: root
+        mode: 0750
+      become: yes
+      become_method: sudo
+    - name: "Download config.toml"
+      shell: wget https://raw.githubusercontent.com/threathunters-io/laurel/master/etc/laurel/config.toml
+    - name: "Move config.toml to /etc/laurel/config.toml"
+      ansible.builtin.copy:
+        src: "config.toml"
+        dest: "/etc/laurel/config.toml"
+        remote_src: no
+        owner: _laurel
+        group: _laurel
+        mode: 0640
+      become: yes
+      become_method: sudo
+    - name: "Edit config.toml"
+      lineinfile:
+        path: /etc/laurel/config.toml
+        regexp: '^read-users = \[\s*"splunk"\s*\]'
+        line: 'read-users = [ "" ]'
+      become: yes
+      become_method: sudo
+    - name: "Create directory /etc/audit/plugins.d"
+      file:
+        path: /etc/audit/plugins.d
+        state: directory
+        owner: root
+        group: root
+        mode: 0750
+      become: yes
+      become_method: sudo
+    - name: "Download laurel.conf"
+      shell: wget https://raw.githubusercontent.com/threathunters-io/laurel/master/etc/audit/plugins.d/laurel.conf
+    - name: "Copy laurel.conf to /etc/audit/plugins.d/laurel.conf"
+      copy:
+        src: "laurel.conf"
+        dest: "/etc/audit/plugins.d/laurel.conf"
+        owner: _laurel
+        group: _laurel
+        mode: 0640
+      become: yes
+      become_method: sudo
+    - name: "Download laurel release"
+      shell: wget https://github.com/threathunters-io/laurel/releases/download/v0.5.2/laurel-v0.5.2-x86_64-glibc.tar.gz
+    - name: "Create directory temporary laurel"
+      file:
+        path: /tmp/laurel
+        state: directory
+        mode: 0750
+    - name: "Install unzip package"
+      apt:
+        name: unzip
+        state: present
+      become: true
+      become_method: sudo
+    - name: "Extract laurel"
+      shell: tar -xzf laurel-v0.5.2-x86_64-glibc.tar.gz -C /tmp/laurel
+    - name: "Copy laurel to /usr/local/sbin/laurel"
+      command: "install -m755 laurel /usr/local/sbin/laurel"
+      args:
+        chdir: /tmp/laurel
+      become: yes
+      become_method: sudo
+    - name: "Restart auditd service"
+      service:
+        name: auditd
+        state: restarted
+      become: yes
+      become_method: sudo
+    - name: "Enable rsyslog service"
+      service:
+        name: rsyslog
+        state: started
+        enabled: yes
+      become: yes
+      become_method: sudo
+    - name: "Configure UFW/Iptables"
+      ufw:
+        state: enabled
+        policy: allow
+      become: yes
+      become_method: sudo
+    - name: "Log SYN packets in INPUT Chain"
+      lineinfile:
+        path: /etc/ufw/after.rules
+        line: "-A ufw-after-input -p tcp --syn -j LOG --log-prefix \"[UFW-SYN-LOG]\""
+        insertbefore: "# don't delete the 'COMMIT' line or these rules won't be processed"
+      become: yes
+      become_method: sudo
+    - name: "Clean file"
+      shell: rm -rf audit.rules config.toml laurel.conf laurel-v0.5.2-x86_64-glibc.tar.gz
